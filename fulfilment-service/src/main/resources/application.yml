@@ -1,0 +1,29 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: fulfilment-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/fulfilment
+    username: app
+    password: app
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      auto-offset-reset: earliest
+
+fulfilment:
+  retry:
+    initial-interval-ms: 1000
+    max-attempts: 3
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
