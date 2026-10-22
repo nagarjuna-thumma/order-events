@@ -1,0 +1,40 @@
+groups:
+  - name: order-events
+    rules:
+      - alert: OutboxBacklogGrowing
+        expr: outbox_oldest_age_seconds{application="order-service"} > 60
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: Outbox events are not reaching Kafka
+          description: >-
+            The oldest unsent outbox event is {{ $value | humanizeDuration }} old.
+            Orders are still being accepted, but fulfilment won't see them until the relay catches up.
+            Check Kafka health and the order-service logs for publish failures.
+
+      - alert: OutboxPublishFailures
+        expr: increase(outbox_publish_failures_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: The outbox relay keeps failing to send to Kafka
+
+      - alert: MessagesDeadLettered
+        expr: increase(orders_placed_dead_lettered_total[10m]) > 0
+        labels:
+          severity: warn
+        annotations:
+          summary: Order events were moved to orders.placed.DLT
+          description: >-
+            {{ $value | humanize }} event(s) failed every retry in the last 10 minutes.
+            Read them from the DLT, fix the cause, then replay them.
+
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: "{{ $labels.job }} is not answering Prometheus scrapes"

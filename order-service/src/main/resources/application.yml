@@ -30,5 +30,8 @@ management:
       exposure:
         include: health,info,metrics,prometheus
   metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
     tags:
       application: ${spring.application.name}
