@@ -72,6 +72,28 @@ curl -s -X POST localhost:8080/orders \
 curl -s localhost:8081/shipments/<order id from the response>
 ```
 
+## Kubernetes
+
+[`k8s/`](k8s) has Kustomize manifests for the whole stack: both services, plus a single-node Postgres and Kafka so it runs on a laptop cluster.
+
+```bash
+mvn -DskipTests package
+docker build --build-arg SERVICE=order-service -t order-service:latest .
+docker build --build-arg SERVICE=fulfilment-service -t fulfilment-service:latest .
+kind load docker-image order-service:latest fulfilment-service:latest
+kubectl apply -k k8s
+```
+
+Things in the manifests that are there for a reason:
+
+- **Two replicas of each service.** The outbox relay locks rows with `SKIP LOCKED`, so two order-service pods can poll the same table without sending an event twice. The two fulfilment pods share a consumer group and split the topic's three partitions.
+- **Separate startup, liveness and readiness probes** on Spring Boot's health groups. A slow start doesn't get the pod killed, and a pod only gets traffic once its database connection is up.
+- **Graceful shutdown.** A short `preStop` pause lets the Service stop routing to the pod, then Spring finishes in-flight requests before the JVM exits. Rolling updates use `maxUnavailable: 0`, and a PodDisruptionBudget keeps one pod of each service up during node drains.
+- **Locked-down containers.** They run as a non-root user with a read-only root filesystem and no Linux capabilities.
+- **Layered image.** Dependencies sit in their own Docker layer, so a code change only rebuilds the small application layer.
+
+CI deploys all of this to a [kind](https://kind.sigs.k8s.io) cluster on every push and runs [`k8s/smoke-test.sh`](k8s/smoke-test.sh). The script places an order through the order-service and waits for the fulfilment-service to create the shipment.
+
 ## Tests
 
 ```bash
@@ -84,11 +106,11 @@ Unit tests use JUnit 5 and Mockito. The integration tests start real Postgres an
 - the same event delivered twice creates only one shipment
 - an unreadable message lands on the dead-letter topic
 
-GitHub Actions runs the full suite on every push.
+GitHub Actions runs the full suite on every push, then deploys to kind and runs the smoke test.
 
 ## Stack
 
-Java 21 · Spring Boot 3.5 · Spring Kafka · Spring Data JPA · PostgreSQL · Flyway · Micrometer · Prometheus · Grafana · Testcontainers · Docker Compose · GitHub Actions
+Java 21 · Spring Boot 3.5 · Spring Kafka · Spring Data JPA · PostgreSQL · Flyway · Micrometer · Prometheus · Grafana · Testcontainers · Docker · Kubernetes · Docker Compose · GitHub Actions
 
 ## What I'd add next
 

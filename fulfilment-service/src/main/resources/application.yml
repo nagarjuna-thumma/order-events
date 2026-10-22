@@ -1,4 +1,5 @@
 server:
+  shutdown: graceful
   port: 8081
 
 spring:
@@ -23,6 +24,10 @@ fulfilment:
     max-attempts: 3
 
 management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
   endpoints:
     web:
       exposure:

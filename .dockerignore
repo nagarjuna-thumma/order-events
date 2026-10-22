@@ -1,0 +1,5 @@
+.git
+**/src
+monitoring
+k8s
+docs

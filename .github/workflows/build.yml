@@ -17,3 +17,41 @@ jobs:
           cache: maven
       - name: Build and run all tests
         run: mvn -B verify
+
+  kubernetes:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Build jars
+        run: mvn -B -DskipTests package
+      - name: Build images
+        run: |
+          docker build --build-arg SERVICE=order-service -t order-service:latest .
+          docker build --build-arg SERVICE=fulfilment-service -t fulfilment-service:latest .
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: order-events
+      - name: Load images into kind
+        run: |
+          kind load docker-image order-service:latest --name order-events
+          kind load docker-image fulfilment-service:latest --name order-events
+      - name: Deploy
+        run: |
+          kubectl apply -k k8s
+          kubectl -n order-events rollout status statefulset/postgres --timeout=180s
+          kubectl -n order-events rollout status statefulset/kafka --timeout=180s
+          kubectl -n order-events rollout status deployment/order-service --timeout=300s
+          kubectl -n order-events rollout status deployment/fulfilment-service --timeout=300s
+      - name: Smoke test
+        run: ./k8s/smoke-test.sh
+      - name: Show pods on failure
+        if: failure()
+        run: |
+          kubectl -n order-events get pods -o wide
+          kubectl -n order-events describe pods | tail -100
