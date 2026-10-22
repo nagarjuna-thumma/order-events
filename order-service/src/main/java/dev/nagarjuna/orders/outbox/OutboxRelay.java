@@ -27,13 +27,16 @@ public class OutboxRelay {
 
     private final OutboxRepository outbox;
     private final KafkaTemplate<String, String> kafka;
+    private final OutboxMetrics metrics;
     private final int batchSize;
 
     public OutboxRelay(OutboxRepository outbox,
                        KafkaTemplate<String, String> kafka,
+                       OutboxMetrics metrics,
                        @Value("${outbox.relay.batch-size:100}") int batchSize) {
         this.outbox = outbox;
         this.kafka = kafka;
+        this.metrics = metrics;
         this.batchSize = batchSize;
     }
 
@@ -45,11 +48,13 @@ public class OutboxRelay {
             try {
                 kafka.send(event.getTopic(), event.getKey(), event.getPayload()).get(10, TimeUnit.SECONDS);
                 event.markPublished();
+                metrics.recordPublished();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
             } catch (ExecutionException | TimeoutException e) {
                 // Stop here so later events for the same order don't overtake this one. Retried next run.
+                metrics.recordFailure();
                 log.warn("Could not publish outbox event {}, will retry", event.getId(), e);
                 return;
             }

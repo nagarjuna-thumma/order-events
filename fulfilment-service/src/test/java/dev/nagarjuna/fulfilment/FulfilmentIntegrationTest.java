@@ -2,6 +2,7 @@ package dev.nagarjuna.fulfilment;
 
 import dev.nagarjuna.fulfilment.domain.ShipmentRepository;
 import dev.nagarjuna.fulfilment.messaging.KafkaConfig;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -39,6 +40,9 @@ class FulfilmentIntegrationTest {
     @Autowired
     KafkaConnectionDetails kafkaConnection;
 
+    @Autowired
+    MeterRegistry meters;
+
     @Test
     void sameEventDeliveredTwiceCreatesOneShipment() throws Exception {
         UUID orderId = UUID.randomUUID();
@@ -56,6 +60,7 @@ class FulfilmentIntegrationTest {
         // Give the duplicate time to be consumed, then check it really was ignored.
         Thread.sleep(2000);
         assertThat(shipments.countByOrderId(orderId)).isEqualTo(1);
+        assertThat(meters.get("orders.placed.duplicates").counter().count()).isGreaterThanOrEqualTo(1);
     }
 
     @Test
@@ -76,6 +81,8 @@ class FulfilmentIntegrationTest {
                 consumer.poll(Duration.ofMillis(500)).forEach(received::add);
                 assertThat(received).anySatisfy(record -> assertThat(record.key()).isEqualTo(key));
             });
+            await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                    assertThat(meters.get("orders.placed.dead.lettered").counter().count()).isGreaterThanOrEqualTo(1));
         }
     }
 }

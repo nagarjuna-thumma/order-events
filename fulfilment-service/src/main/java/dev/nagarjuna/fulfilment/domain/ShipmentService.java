@@ -25,15 +25,18 @@ public class ShipmentService {
     /**
      * Kafka can deliver the same event more than once, so this has to be safe to repeat.
      * The shipment and the processed-event marker are written in the same transaction.
+     *
+     * @return true if a shipment was created, false if the event had already been handled
      */
     @Transactional
-    public void handle(OrderPlacedEvent event) {
+    public boolean handle(OrderPlacedEvent event) {
         if (processedEvents.existsById(event.eventId())) {
             log.info("Skipping duplicate event {} for order {}", event.eventId(), event.orderId());
-            return;
+            return false;
         }
         processedEvents.save(new ProcessedEvent(event.eventId()));
         shipments.save(Shipment.pendingFor(event.orderId(), event.sku(), event.quantity()));
+        return true;
     }
 
     @Transactional(readOnly = true)

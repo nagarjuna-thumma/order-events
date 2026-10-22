@@ -1,6 +1,8 @@
 package dev.nagarjuna.fulfilment.messaging;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.TopicPartition;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,15 +32,23 @@ public class KafkaConfig {
      */
     @Bean
     DefaultErrorHandler kafkaErrorHandler(KafkaTemplate<String, String> template,
+                                          MeterRegistry registry,
                                           @Value("${fulfilment.retry.initial-interval-ms:1000}") long initialInterval,
                                           @Value("${fulfilment.retry.max-attempts:3}") int maxAttempts) {
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(template,
                 (record, ex) -> new TopicPartition(ORDERS_PLACED_DLT, 0));
+        // Anything landing on the DLT needs a person to look at it, so it gets its own counter and alert.
+        Counter deadLettered = Counter.builder("orders.placed.dead.lettered")
+                .description("Order events moved to the dead-letter topic")
+                .register(registry);
 
         ExponentialBackOff backOff = new ExponentialBackOff(initialInterval, 2.0);
         backOff.setMaxAttempts(maxAttempts);
 
-        DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, backOff);
+        DefaultErrorHandler handler = new DefaultErrorHandler((record, ex) -> {
+            recoverer.accept(record, ex);
+            deadLettered.increment();
+        }, backOff);
         handler.addNotRetryableExceptions(JsonProcessingException.class);
         return handler;
     }

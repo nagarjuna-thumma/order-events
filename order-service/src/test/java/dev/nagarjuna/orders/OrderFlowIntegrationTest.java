@@ -10,6 +10,7 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.kafka.KafkaConnectionDetails;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.context.annotation.Import;
@@ -30,6 +31,7 @@ import static org.awaitility.Awaitility.await;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(TestcontainersConfig.class)
 @Testcontainers(disabledWithoutDocker = true)
+@AutoConfigureObservability(tracing = false)
 class OrderFlowIntegrationTest {
 
     @Autowired
@@ -72,6 +74,18 @@ class OrderFlowIntegrationTest {
                 });
             });
         }
+    }
+
+    @Test
+    void outboxMetricsAreExposedForPrometheus() {
+        ResponseEntity<String> response = http.getForEntity("/actuator/prometheus", String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody())
+                .contains("outbox_pending")
+                .contains("outbox_oldest_age_seconds")
+                .contains("outbox_published_total")
+                .contains("application=\"order-service\"");
     }
 
     @Test

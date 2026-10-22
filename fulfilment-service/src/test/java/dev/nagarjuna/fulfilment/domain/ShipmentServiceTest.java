@@ -11,6 +11,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -35,7 +36,7 @@ class ShipmentServiceTest {
     void newEventCreatesAShipment() {
         when(processedEvents.existsById(event.eventId())).thenReturn(false);
 
-        service.handle(event);
+        assertThat(service.handle(event)).isTrue();
 
         verify(processedEvents).save(any(ProcessedEvent.class));
         verify(shipments).save(any(Shipment.class));
@@ -45,7 +46,7 @@ class ShipmentServiceTest {
     void duplicateEventIsIgnored() {
         when(processedEvents.existsById(event.eventId())).thenReturn(true);
 
-        service.handle(event);
+        assertThat(service.handle(event)).isFalse();
 
         verify(shipments, never()).save(any());
     }
