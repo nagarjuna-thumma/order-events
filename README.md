@@ -15,6 +15,7 @@ flowchart LR
     kafka --> fs[fulfilment-service]
     fs -->|one transaction| db2[(shipments + processed_events)]
     fs -.->|after retries| dlt{{orders.placed.DLT}}
+    db2 -->|webhook dispatcher| partner([partner endpoints])
 ```
 
 ## What's in it
@@ -26,6 +27,28 @@ flowchart LR
 **Retries and a dead-letter topic.** Failed messages are retried with exponential backoff, then moved to `orders.placed.DLT`. Messages that can't be parsed go straight to the DLT, because retrying won't fix them.
 
 **Ordering.** Events are keyed by order id, so everything about one order stays on one partition and in order. The relay stops at the first failed send in a batch for the same reason.
+
+## Webhooks
+
+The fulfilment service tells outside systems (a warehouse, a customer's own app) about new shipments by POSTing `shipment.created` events to URLs they register. Getting this right is the same problem as the Kafka side, just over HTTP to servers you don't control.
+
+```bash
+curl -s -X POST localhost:8081/webhooks/subscriptions \
+  -H 'Content-Type: application/json' -d '{"url":"https://partner.example/hooks"}'
+# {"id":"...","url":"...","secret":"whsec_...","createdAt":"..."}   the secret is only shown here
+```
+
+**Saved with the shipment.** Creating a shipment writes one `webhook_deliveries` row per active subscriber in the same transaction. A webhook is never sent for a shipment that rolled back and never lost for one that committed. It's the outbox pattern again.
+
+**Signed.** Each request carries `X-Webhook-Signature: t=<unix time>,v1=<HMAC-SHA256 of "t.body">`. The timestamp is inside the signature, so a receiver can reject anything older than a few minutes and a captured request can't be replayed. `WebhookSignature.verify` is the receiver side and compares in constant time.
+
+**Same id on every retry.** `X-Webhook-Id` stays the same across attempts so the receiver can drop duplicates, like the idempotent consumer does here.
+
+**Retries that don't make things worse.** 5xx, 408, 429, timeouts and connection errors are retried with exponential backoff (10 s doubling to a 1 h cap, 12 attempts, about 3.5 hours) with jitter, so a partner coming back from an outage isn't hit by every queued event in the same second. Other 4xx answers mean the request itself is wrong, so the delivery fails at once.
+
+**No locks held during the HTTP call.** The dispatcher claims due rows with `FOR UPDATE SKIP LOCKED` and leases them for 60 s in one short transaction, sends outside any transaction, then records the result in another. Several instances can run the dispatcher, and a slow partner doesn't tie up database connections.
+
+**Operator tools.** `GET /webhooks/deliveries?status=FAILED` lists what gave up, `POST /webhooks/deliveries/{id}/redeliver` replays one once the partner is fixed, and `webhook_deliveries_total{outcome=delivered|retry|failed}` goes to Prometheus.
 
 ## Monitoring
 
@@ -105,6 +128,11 @@ Unit tests use JUnit 5 and Mockito. The integration tests start real Postgres an
 - an order placed over HTTP ends up as a message on `orders.placed`
 - the same event delivered twice creates only one shipment
 - an unreadable message lands on the dead-letter topic
+- a webhook receiver that returns 500 twice gets the event on the third try, with the same id each time and a signature that verifies
+- a 400 is not retried, shows up as FAILED and can be redelivered by hand
+- a receiver that never recovers stops getting requests after the last attempt
+
+The webhook tests run a real HTTP server inside the test as the partner endpoint. `WebhookSignatureTest` checks the HMAC against one computed with `openssl`.
 
 GitHub Actions runs the full suite on every push, then deploys to kind and runs the smoke test.
 
@@ -117,3 +145,5 @@ Java 21 · Spring Boot 3.5 · Spring Kafka · Spring Data JPA · PostgreSQL · F
 - Avro or JSON Schema with a schema registry instead of each service keeping its own copy of the event
 - A cleanup job for old published outbox rows and old `processed_events` rows
 - Debezium CDC as an alternative to the polling relay
+- Encrypt webhook secrets at rest and support rotating them with two valid secrets for a while
+- Turn off a webhook subscription automatically after it has failed for days

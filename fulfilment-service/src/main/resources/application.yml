@@ -22,6 +22,12 @@ fulfilment:
   retry:
     initial-interval-ms: 1000
     max-attempts: 3
+  webhooks:
+    max-attempts: 12         # backoff doubles up to 1h, so about 3.5 hours before giving up
+    initial-backoff: 10s
+    max-backoff: 1h
+    timeout: 5s
+    poll-interval: 1s
 
 management:
   endpoint:

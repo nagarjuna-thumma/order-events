@@ -1,11 +1,13 @@
 package dev.nagarjuna.fulfilment.domain;
 
 import dev.nagarjuna.fulfilment.messaging.OrderPlacedEvent;
+import dev.nagarjuna.fulfilment.webhook.WebhookPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -16,15 +18,17 @@ public class ShipmentService {
 
     private final ShipmentRepository shipments;
     private final ProcessedEventRepository processedEvents;
+    private final WebhookPublisher webhooks;
 
-    public ShipmentService(ShipmentRepository shipments, ProcessedEventRepository processedEvents) {
+    public ShipmentService(ShipmentRepository shipments, ProcessedEventRepository processedEvents, WebhookPublisher webhooks) {
         this.shipments = shipments;
         this.processedEvents = processedEvents;
+        this.webhooks = webhooks;
     }
 
     /**
      * Kafka can deliver the same event more than once, so this has to be safe to repeat.
-     * The shipment and the processed-event marker are written in the same transaction.
+     * The shipment, the processed-event marker and the outgoing webhooks are written in the same transaction.
      *
      * @return true if a shipment was created, false if the event had already been handled
      */
@@ -35,7 +39,13 @@ public class ShipmentService {
             return false;
         }
         processedEvents.save(new ProcessedEvent(event.eventId()));
-        shipments.save(Shipment.pendingFor(event.orderId(), event.sku(), event.quantity()));
+        Shipment shipment = shipments.save(Shipment.pendingFor(event.orderId(), event.sku(), event.quantity()));
+        webhooks.publish("shipment.created", Map.of(
+                "shipmentId", shipment.getId(),
+                "orderId", shipment.getOrderId(),
+                "sku", shipment.getSku(),
+                "quantity", shipment.getQuantity(),
+                "status", shipment.getStatus().name()));
         return true;
     }
 
