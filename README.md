@@ -136,6 +136,10 @@ Things in the manifests that are there for a reason:
 
 CI deploys all of this to a [kind](https://kind.sigs.k8s.io) cluster on every push and runs [`k8s/smoke-test.sh`](k8s/smoke-test.sh). The script places an order through the order-service and waits for the fulfilment-service to create the shipment.
 
+## Google Cloud
+
+[`infra/gcp`](infra/gcp) has Terraform for running both services on Cloud Run with Cloud SQL Postgres on a private IP, the database password in Secret Manager, a service account per service and an Artifact Registry repository. Cloud Run keeps CPU allocated and one instance warm, because the outbox relay, the consumer and the webhook dispatcher work in the background. `terraform test` checks the important settings against mocked providers in CI. Details in [infra/gcp/README.md](infra/gcp/README.md).
+
 ## Tests
 
 ```bash
@@ -158,7 +162,7 @@ GitHub Actions runs the full suite on every push, then deploys to kind and runs 
 
 ## Stack
 
-Java 21 · Spring Boot 3.5 · Spring Kafka · Spring Data JPA · PostgreSQL · Flyway · Micrometer · OpenTelemetry · Jaeger · Prometheus · Grafana · Testcontainers · Docker · Kubernetes · Docker Compose · GitHub Actions
+Java 21 · Spring Boot 3.5 · Spring Kafka · Spring Data JPA · PostgreSQL · Flyway · Micrometer · OpenTelemetry · Jaeger · Prometheus · Grafana · Testcontainers · Docker · Kubernetes · Terraform · Google Cloud Run · Cloud SQL · Docker Compose · GitHub Actions
 
 ## What I'd add next
 
