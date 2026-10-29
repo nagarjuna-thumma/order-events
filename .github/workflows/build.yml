@@ -18,6 +18,22 @@ jobs:
       - name: Build and run all tests
         run: mvn -B verify
 
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/gcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.7
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - name: Plan tests with mocked providers
+        run: terraform test
+
   kubernetes:
     needs: test
     runs-on: ubuntu-latest

@@ -1,0 +1,5 @@
+project_id              = "my-gcp-project"
+environment             = "dev"
+kafka_bootstrap_servers = "bootstrap.my-kafka.northamerica-northeast2.managedkafka.my-gcp-project.cloud.goog:9092"
+image_tag               = "1.0.0"
+public_order_api        = true

@@ -20,6 +20,16 @@ public class KafkaConfig {
     public static final String ORDERS_PLACED = "orders.placed";
     public static final String ORDERS_PLACED_DLT = ORDERS_PLACED + ".DLT";
 
+    /**
+     * Also declared by order-service, with the same settings. If this service starts first and
+     * the topic doesn't exist yet, the consumer would only see it at its next metadata refresh,
+     * up to five minutes later. Declaring it here means whichever starts first creates it.
+     */
+    @Bean
+    NewTopic ordersPlacedTopic() {
+        return TopicBuilder.name(ORDERS_PLACED).partitions(3).replicas(1).build();
+    }
+
     @Bean
     NewTopic ordersPlacedDeadLetterTopic() {
         return TopicBuilder.name(ORDERS_PLACED_DLT).partitions(1).replicas(1).build();
