@@ -16,7 +16,7 @@ for port in 18080 18081; do
   done
 done
 
-order_id=$(curl -sf -X POST localhost:18080/orders \
+order_id=$(curl -sf --retry 5 --retry-connrefused --retry-delay 2 -X POST localhost:18080/orders \
   -H 'Content-Type: application/json' \
   -d '{"customerId":"smoke","sku":"SKU-1","quantity":1,"totalAmount":9.99}' | jq -r .id)
 echo "placed order $order_id"
@@ -30,6 +30,9 @@ for _ in $(seq 30); do
 done
 
 echo "no shipment for $order_id after 60s" >&2
+# ::error:: lines show up as annotations on the CI run, which are easier to find than the raw log.
+echo "::error::no shipment for order $order_id after 60s"
+kubectl -n "$NS" logs deploy/fulfilment-service --tail=200 | grep -iE "warn|error|partitions assigned" | tail -5 | sed 's/^/::error::fulfilment: /' || true
 kubectl -n "$NS" logs deploy/order-service --tail=50 >&2
 kubectl -n "$NS" logs deploy/fulfilment-service --tail=50 >&2
 exit 1
