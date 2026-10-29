@@ -7,7 +7,14 @@ NS=order-events
 kubectl -n "$NS" port-forward svc/order-service 18080:80 >/dev/null 2>&1 &
 kubectl -n "$NS" port-forward svc/fulfilment-service 18081:80 >/dev/null 2>&1 &
 trap 'kill $(jobs -p) 2>/dev/null' EXIT
-sleep 3
+
+# port-forward takes a moment to start listening. Wait for both instead of guessing with a sleep.
+for port in 18080 18081; do
+  for _ in $(seq 30); do
+    curl -sf "localhost:$port/actuator/health/readiness" >/dev/null && break
+    sleep 1
+  done
+done
 
 order_id=$(curl -sf -X POST localhost:18080/orders \
   -H 'Content-Type: application/json' \
