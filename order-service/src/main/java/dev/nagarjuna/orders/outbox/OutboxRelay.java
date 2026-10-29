@@ -1,5 +1,8 @@
 package dev.nagarjuna.orders.outbox;
 
+import dev.nagarjuna.orders.tracing.TraceParents;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,15 +31,18 @@ public class OutboxRelay {
     private final OutboxRepository outbox;
     private final KafkaTemplate<String, String> kafka;
     private final OutboxMetrics metrics;
+    private final TraceParents traceParents;
     private final int batchSize;
 
     public OutboxRelay(OutboxRepository outbox,
                        KafkaTemplate<String, String> kafka,
                        OutboxMetrics metrics,
+                       TraceParents traceParents,
                        @Value("${outbox.relay.batch-size:100}") int batchSize) {
         this.outbox = outbox;
         this.kafka = kafka;
         this.metrics = metrics;
+        this.traceParents = traceParents;
         this.batchSize = batchSize;
     }
 
@@ -45,7 +51,10 @@ public class OutboxRelay {
     public void publishPending() {
         List<OutboxEvent> batch = outbox.lockNextBatch(batchSize);
         for (OutboxEvent event : batch) {
-            try {
+            // Continue the trace of the request that placed the order. The Kafka producer span
+            // becomes a child of this one and adds the traceparent header to the message.
+            Span span = traceParents.startChild(event.getTraceParent(), "outbox publish");
+            try (Tracer.SpanInScope ignored = traceParents.tracer().withSpan(span)) {
                 kafka.send(event.getTopic(), event.getKey(), event.getPayload()).get(10, TimeUnit.SECONDS);
                 event.markPublished();
                 metrics.recordPublished();
@@ -54,9 +63,12 @@ public class OutboxRelay {
                 return;
             } catch (ExecutionException | TimeoutException e) {
                 // Stop here so later events for the same order don't overtake this one. Retried next run.
+                span.error(e);
                 metrics.recordFailure();
                 log.warn("Could not publish outbox event {}, will retry", event.getId(), e);
                 return;
+            } finally {
+                span.end();
             }
         }
     }

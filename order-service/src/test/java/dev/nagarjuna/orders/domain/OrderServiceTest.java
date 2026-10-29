@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import dev.nagarjuna.orders.outbox.OutboxEvent;
 import dev.nagarjuna.orders.outbox.OutboxRepository;
+import dev.nagarjuna.orders.tracing.TraceParents;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,16 +28,22 @@ class OrderServiceTest {
     @Mock
     OutboxRepository outbox;
 
+    @Mock
+    TraceParents traceParents;
+
     OrderService service;
 
     @BeforeEach
     void setUp() {
-        service = new OrderService(orders, outbox, new ObjectMapper().registerModule(new JavaTimeModule()));
+        service = new OrderService(orders, outbox, new ObjectMapper().registerModule(new JavaTimeModule()), traceParents);
         when(orders.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
     @Test
     void placingAnOrderAlsoWritesAnOutboxEventKeyedByOrderId() {
+        String traceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        when(traceParents.current()).thenReturn(traceParent);
+
         Order order = service.placeOrder("cust-42", "SKU-1", 2, new BigDecimal("19.98"));
 
         ArgumentCaptor<OutboxEvent> captor = ArgumentCaptor.forClass(OutboxEvent.class);
@@ -50,5 +57,6 @@ class OrderServiceTest {
                 .contains("\"sku\":\"SKU-1\"")
                 .contains("\"quantity\":2");
         assertThat(event.getPublishedAt()).isNull();
+        assertThat(event.getTraceParent()).as("relay continues the request's trace").isEqualTo(traceParent);
     }
 }

@@ -29,16 +29,19 @@ public class OutboxEvent {
 
     private Instant publishedAt;
 
+    private String traceParent;
+
     protected OutboxEvent() {
         // for JPA
     }
 
-    public static OutboxEvent of(UUID id, String topic, String key, String payload) {
+    public static OutboxEvent of(UUID id, String topic, String key, String payload, String traceParent) {
         OutboxEvent event = new OutboxEvent();
         event.id = id;
         event.topic = topic;
         event.key = key;
         event.payload = payload;
+        event.traceParent = traceParent;
         event.createdAt = Instant.now();
         return event;
     }
@@ -52,4 +55,5 @@ public class OutboxEvent {
     public String getKey() { return key; }
     public String getPayload() { return payload; }
     public Instant getPublishedAt() { return publishedAt; }
+    public String getTraceParent() { return traceParent; }
 }

@@ -46,6 +46,12 @@ spec:
                 secretKeyRef: { name: db-credentials, key: password }
             - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
               value: kafka:9092
+            # One JSON object per log line (Elastic Common Schema), with traceId and spanId, ready for a log shipper.
+            - name: LOGGING_STRUCTURED_FORMAT_CONSOLE
+              value: ecs
+            # No trace collector in this cluster. Trace ids still go into every log line.
+            - name: MANAGEMENT_OTLP_TRACING_EXPORT_ENABLED
+              value: "false"
           resources:
             requests:
               cpu: 250m

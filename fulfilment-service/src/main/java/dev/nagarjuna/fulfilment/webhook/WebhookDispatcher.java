@@ -1,6 +1,9 @@
 package dev.nagarjuna.fulfilment.webhook;
 
+import dev.nagarjuna.fulfilment.tracing.TraceParents;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -26,21 +29,31 @@ class WebhookDispatcher {
     private final RestClient http;
     private final Clock clock;
     private final MeterRegistry meters;
+    private final TraceParents traceParents;
 
-    WebhookDispatcher(WebhookDeliveryStore store, WebhookProperties props, Clock clock, MeterRegistry meters) {
+    WebhookDispatcher(WebhookDeliveryStore store, WebhookProperties props, Clock clock, MeterRegistry meters,
+                      TraceParents traceParents, RestClient.Builder restClient) {
         this.store = store;
         this.clock = clock;
         this.meters = meters;
+        this.traceParents = traceParents;
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
                 HttpClient.newBuilder().connectTimeout(props.timeout()).build());
         factory.setReadTimeout(props.timeout());
-        this.http = RestClient.builder().requestFactory(factory).build();
+        // The Boot-provided builder is instrumented, so each call gets a client span and a traceparent header.
+        this.http = restClient.requestFactory(factory).build();
     }
 
     @Scheduled(fixedDelayString = "${fulfilment.webhooks.poll-interval:1s}")
     void dispatch() {
         for (WebhookDeliveryStore.Claimed d : store.claimDue()) {
-            send(d);
+            // Each attempt joins the trace of the Kafka message that created the shipment.
+            Span span = traceParents.startChild(d.traceParent(), "webhook deliver");
+            try (Tracer.SpanInScope ignored = traceParents.tracer().withSpan(span)) {
+                send(d);
+            } finally {
+                span.end();
+            }
         }
     }
 

@@ -15,6 +15,8 @@ spring:
       ddl-auto: validate
   kafka:
     bootstrap-servers: localhost:9092
+    template:
+      observation-enabled: true   # producer spans and a traceparent header on every message
     producer:
       acks: all
       properties:
@@ -26,6 +28,12 @@ outbox:
     batch-size: 100
 
 management:
+  tracing:
+    sampling:
+      probability: 1.0   # keep every trace locally; lower this in production
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces   # Jaeger from docker compose
   endpoint:
     health:
       probes:

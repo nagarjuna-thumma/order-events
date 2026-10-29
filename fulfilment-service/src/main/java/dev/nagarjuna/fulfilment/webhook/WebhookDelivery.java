@@ -48,16 +48,19 @@ public class WebhookDelivery {
 
     private Instant deliveredAt;
 
+    private String traceParent;
+
     protected WebhookDelivery() {
         // for JPA
     }
 
-    static WebhookDelivery pending(UUID id, UUID subscriptionId, String eventType, String payload, Instant now) {
+    static WebhookDelivery pending(UUID id, UUID subscriptionId, String eventType, String payload, String traceParent, Instant now) {
         WebhookDelivery d = new WebhookDelivery();
         d.id = id;
         d.subscriptionId = subscriptionId;
         d.eventType = eventType;
         d.payload = payload;
+        d.traceParent = traceParent;
         d.status = DeliveryStatus.PENDING;
         d.nextAttemptAt = now;
         d.createdAt = now;
@@ -106,4 +109,5 @@ public class WebhookDelivery {
     public String getLastError() { return lastError; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getDeliveredAt() { return deliveredAt; }
+    public String getTraceParent() { return traceParent; }
 }

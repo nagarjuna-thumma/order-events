@@ -3,10 +3,12 @@ package dev.nagarjuna.fulfilment;
 import com.sun.net.httpserver.HttpServer;
 import dev.nagarjuna.fulfilment.messaging.KafkaConfig;
 import dev.nagarjuna.fulfilment.webhook.WebhookSignature;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.context.annotation.Import;
@@ -36,14 +38,16 @@ import static org.awaitility.Awaitility.await;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(TestcontainersConfig.class)
 @Testcontainers(disabledWithoutDocker = true)
+@AutoConfigureObservability
 @TestPropertySource(properties = {
+        "management.otlp.tracing.export.enabled=false",
         "fulfilment.webhooks.initial-backoff=200ms",
         "fulfilment.webhooks.max-backoff=1s",
         "fulfilment.webhooks.max-attempts=4",
         "fulfilment.webhooks.poll-interval=100ms"})
 class WebhookIntegrationTest {
 
-    record Received(String webhookId, String signature, String body) {
+    record Received(String webhookId, String signature, String traceparent, String body) {
     }
 
     @Autowired KafkaTemplate<String, String> kafka;
@@ -61,7 +65,8 @@ class WebhookIntegrationTest {
         receiver.createContext("/hooks", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             received.add(new Received(exchange.getRequestHeaders().getFirst("X-Webhook-Id"),
-                    exchange.getRequestHeaders().getFirst(WebhookSignature.HEADER), body));
+                    exchange.getRequestHeaders().getFirst(WebhookSignature.HEADER),
+                    exchange.getRequestHeaders().getFirst("traceparent"), body));
             Integer status = responses.poll();
             exchange.sendResponseHeaders(status == null ? 200 : status, -1);
             exchange.close();
@@ -82,11 +87,18 @@ class WebhookIntegrationTest {
     }
 
     private UUID placeOrder() throws Exception {
+        return placeOrder(null);
+    }
+
+    private UUID placeOrder(String traceparent) throws Exception {
         UUID orderId = UUID.randomUUID();
-        kafka.send(KafkaConfig.ORDERS_PLACED, orderId.toString(), """
+        ProducerRecord<String, String> record = new ProducerRecord<>(KafkaConfig.ORDERS_PLACED, orderId.toString(), """
                 {"eventId":"%s","orderId":"%s","customerId":"cust-1","sku":"SKU-7",
                  "quantity":3,"totalAmount":30.00,"occurredAt":"2026-01-01T10:00:00Z"}
-                """.formatted(UUID.randomUUID(), orderId)).get();
+                """.formatted(UUID.randomUUID(), orderId));
+        if (traceparent != null) record.headers().add("traceparent", traceparent.getBytes(StandardCharsets.UTF_8));
+        // Straight to the producer: the template's own tracing would replace our header with a new trace.
+        kafka.execute(producer -> producer.send(record)).get();
         return orderId;
     }
 
@@ -146,5 +158,14 @@ class WebhookIntegrationTest {
                 }));
         Thread.sleep(1500);
         assertThat(received).as("nothing sent after giving up").hasSize(4);
+    }
+
+    @Test
+    void webhookJoinsTheTraceOfTheKafkaMessageThatCausedIt() throws Exception {
+        String traceId = "0af7651916cd43dd8448eb211c80319c";
+        placeOrder("00-" + traceId + "-b7ad6b7169203331-01");
+
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(received).hasSize(1));
+        assertThat(received.peek().traceparent()).startsWith("00-" + traceId + "-");
     }
 }

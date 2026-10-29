@@ -75,12 +75,31 @@ Alerts:
 - **MessagesDeadLettered** fires on any new DLT message, because each one needs someone to look at it.
 - **ServiceDown** fires when a scrape fails for a minute.
 
+## Tracing and logs
+
+Both services use Micrometer Tracing with the OpenTelemetry bridge and send spans over OTLP to Jaeger (http://localhost:16686 when compose is up). One order is one trace, from the HTTP request to the partner's webhook:
+
+```
+POST /orders                         order-service
+  outbox publish                     order-service, scheduled relay
+    orders.placed send               Kafka producer
+      orders.placed receive          fulfilment-service consumer
+        webhook deliver              fulfilment-service, scheduled dispatcher
+          http post                  call to the partner, with a traceparent header
+```
+
+The hard part is the two pollers. The outbox relay and the webhook dispatcher run later on their own threads, so the normal in-process propagation has nothing to carry. Each row stores the W3C `traceparent` of the span that created it (`outbox_events.trace_parent`, `webhook_deliveries.trace_parent`), and the poller starts its span as a child of that. Kafka observation is switched on for the producer and the listener, so the header crosses the broker on its own.
+
+`TracingIntegrationTest` sends a request with a known trace id and checks the same id comes out on the Kafka message after the relay. A webhook test does the same from a Kafka header to the HTTP request the partner receives.
+
+Every log line carries `traceId` and `spanId`, so you can go from a log to the trace and back. In Kubernetes the services log one JSON object per line in Elastic Common Schema (`LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs`), ready for Fluent Bit or a similar shipper. Locally they log plain text.
+
 ## Running it
 
 You need Java 21 and Docker.
 
 ```bash
-docker compose up -d                      # Postgres, Kafka, Prometheus, Grafana
+docker compose up -d                      # Postgres, Kafka, Jaeger, Prometheus, Grafana
 mvn -pl order-service spring-boot:run      # port 8080
 mvn -pl fulfilment-service spring-boot:run # port 8081, in another terminal
 ```
@@ -131,6 +150,7 @@ Unit tests use JUnit 5 and Mockito. The integration tests start real Postgres an
 - a webhook receiver that returns 500 twice gets the event on the third try, with the same id each time and a signature that verifies
 - a 400 is not retried, shows up as FAILED and can be redelivered by hand
 - a receiver that never recovers stops getting requests after the last attempt
+- the trace id from an incoming request reaches the Kafka message after the outbox relay, and the trace id on a Kafka message reaches the partner's webhook request
 
 The webhook tests run a real HTTP server inside the test as the partner endpoint. `WebhookSignatureTest` checks the HMAC against one computed with `openssl`.
 
@@ -138,7 +158,7 @@ GitHub Actions runs the full suite on every push, then deploys to kind and runs 
 
 ## Stack
 
-Java 21 · Spring Boot 3.5 · Spring Kafka · Spring Data JPA · PostgreSQL · Flyway · Micrometer · Prometheus · Grafana · Testcontainers · Docker · Kubernetes · Docker Compose · GitHub Actions
+Java 21 · Spring Boot 3.5 · Spring Kafka · Spring Data JPA · PostgreSQL · Flyway · Micrometer · OpenTelemetry · Jaeger · Prometheus · Grafana · Testcontainers · Docker · Kubernetes · Docker Compose · GitHub Actions
 
 ## What I'd add next
 

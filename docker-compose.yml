@@ -15,6 +15,12 @@ services:
     ports:
       - "9092:9092"
 
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    ports:
+      - "16686:16686"   # UI
+      - "4318:4318"     # OTLP over HTTP, where both services send their spans
+
   prometheus:
     image: prom/prometheus:v3.5.0
     ports:

@@ -17,7 +17,7 @@ import java.util.concurrent.ThreadLocalRandom;
 @Component
 class WebhookDeliveryStore {
 
-    record Claimed(UUID id, String url, String secret, String payload, int attemptsSoFar) {
+    record Claimed(UUID id, String url, String secret, String payload, int attemptsSoFar, String traceParent) {
     }
 
     private final WebhookDeliveryRepository deliveries;
@@ -42,7 +42,7 @@ class WebhookDeliveryStore {
         return deliveries.lockDue(now, props.batchSize()).stream().map(d -> {
             d.lease(now.plus(props.lease()));
             WebhookSubscription sub = subscriptions.findById(d.getSubscriptionId()).orElseThrow();
-            return new Claimed(d.getId(), sub.getUrl(), sub.getSecret(), d.getPayload(), d.getAttempts());
+            return new Claimed(d.getId(), sub.getUrl(), sub.getSecret(), d.getPayload(), d.getAttempts(), d.getTraceParent());
         }).toList();
     }
 

@@ -15,6 +15,10 @@ spring:
       ddl-auto: validate
   kafka:
     bootstrap-servers: localhost:9092
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true   # the consumer span continues the trace from the message header
     consumer:
       auto-offset-reset: earliest
 
@@ -30,6 +34,12 @@ fulfilment:
     poll-interval: 1s
 
 management:
+  tracing:
+    sampling:
+      probability: 1.0   # keep every trace locally; lower this in production
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces   # Jaeger from docker compose
   endpoint:
     health:
       probes:

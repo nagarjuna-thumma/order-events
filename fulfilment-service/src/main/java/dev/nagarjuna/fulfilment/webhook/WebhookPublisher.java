@@ -2,6 +2,7 @@ package dev.nagarjuna.fulfilment.webhook;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.nagarjuna.fulfilment.tracing.TraceParents;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,19 +25,22 @@ public class WebhookPublisher {
     private final WebhookSubscriptionRepository subscriptions;
     private final WebhookDeliveryRepository deliveries;
     private final ObjectMapper objectMapper;
+    private final TraceParents traceParents;
     private final Clock clock;
 
     public WebhookPublisher(WebhookSubscriptionRepository subscriptions, WebhookDeliveryRepository deliveries,
-                            ObjectMapper objectMapper, Clock clock) {
+                            ObjectMapper objectMapper, TraceParents traceParents, Clock clock) {
         this.subscriptions = subscriptions;
         this.deliveries = deliveries;
         this.objectMapper = objectMapper;
+        this.traceParents = traceParents;
         this.clock = clock;
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void publish(String eventType, Object data) {
         Instant now = clock.instant();
+        String traceParent = traceParents.current();
         for (WebhookSubscription sub : subscriptions.findByActiveTrue()) {
             UUID id = UUID.randomUUID();
             Map<String, Object> envelope = new LinkedHashMap<>();
@@ -44,7 +48,7 @@ public class WebhookPublisher {
             envelope.put("type", eventType);
             envelope.put("createdAt", now);
             envelope.put("data", data);
-            deliveries.save(WebhookDelivery.pending(id, sub.getId(), eventType, toJson(envelope), now));
+            deliveries.save(WebhookDelivery.pending(id, sub.getId(), eventType, toJson(envelope), traceParent, now));
         }
     }
 
